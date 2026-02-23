@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/rene/autorepair/logs/.85029d520924b7e172b1c0df48e91f3874385a2d-audit.json",
+    "files": [
+        {
+            "date": 1771857089813,
+            "name": "/home/rene/autorepair/logs/mcp-puppeteer-2026-02-23.log",
+            "hash": "80719bf30ec8f3f4a08f2f2bec3b3520931cd3cdd341c628fd91a17da83d0701"
+        }
+    ],
+    "hashType": "sha256"
+}
