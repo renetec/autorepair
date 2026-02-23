@@ -154,6 +154,17 @@ app.delete('/api/parts/:id', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/config — runtime config for the frontend
+app.get('/api/config', (_req, res) => {
+  res.json({ gemini_api_key: process.env.GEMINI_API_KEY ?? '' });
+});
+
+// Serve built frontend (production)
+app.use(express.static(path.join(__dirname, 'dist')));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Express server running on port ${PORT}`);

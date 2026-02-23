@@ -3,7 +3,6 @@ import { GoogleGenAI } from '@google/genai';
 import { Send, User, Wrench, Loader2, AlertTriangle } from 'lucide-react';
 import Markdown from 'react-markdown';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const BASE_SYSTEM_PROMPT =
   "You are a helpful and knowledgeable customer service representative for {SHOP_NAME}. " +
@@ -73,14 +72,18 @@ export default function App() {
     async function initChat() {
       let priceList = '';
       let fetchedShopName: string = "Mike's Auto Repair";
+      let geminiKey = '';
       try {
-        const [partsRes, settingsRes] = await Promise.all([
+        const [partsRes, settingsRes, configRes] = await Promise.all([
           fetch('/api/parts'),
           fetch('/api/settings'),
+          fetch('/api/config'),
         ]);
         const parts: Part[] = partsRes.ok ? await partsRes.json() : [];
         const settings = settingsRes.ok ? await settingsRes.json() : {};
+        const config = configRes.ok ? await configRes.json() : {};
         fetchedShopName = settings.shop_name ?? "Mike's Auto Repair";
+        geminiKey = config.gemini_api_key ?? '';
         setShopName(fetchedShopName);
         setMessages([{
           id: '1',
@@ -89,9 +92,10 @@ export default function App() {
         }]);
         priceList = formatPriceList(parts);
       } catch (err) {
-        console.warn('Could not fetch prices — using base prompt only:', err);
+        console.warn('Could not fetch config — using base prompt only:', err);
       }
 
+      const ai = new GoogleGenAI({ apiKey: geminiKey });
       chatRef.current = ai.chats.create({
         model: 'gemini-3-flash-preview',
         config: {
