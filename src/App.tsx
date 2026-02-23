@@ -1,50 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { Send, User, Wrench, Loader2, AlertTriangle } from 'lucide-react';
 import Markdown from 'react-markdown';
-
-
-const BASE_SYSTEM_PROMPT =
-  "You are a helpful and knowledgeable customer service representative for {SHOP_NAME}. " +
-  "You can answer questions about common car issues, provide pricing for services using the price list provided, " +
-  "and help customers understand when they need to bring their car in for a diagnostic. " +
-  "Be polite, professional, and reassuring. " +
-  "If a problem sounds dangerous (like failing brakes, severe engine knocking, or flashing check engine light), " +
-  "advise them to stop driving and get it towed. " +
-  "Do not make definitive diagnoses without seeing the car. " +
-  "When quoting prices, always use the prices in the price list below — do not guess or use outside knowledge for pricing. " +
-  "Keep your responses concise and easy to read, using markdown formatting for lists or emphasis where appropriate.";
-
-type Part = {
-  id: number;
-  category: string;
-  name: string;
-  price_low: number;
-  price_high: number | null;
-  notes: string | null;
-};
-
-function formatPriceList(parts: Part[]): string {
-  const lines: string[] = ['OUR CURRENT PRICES:'];
-
-  const byCategory: Record<string, Part[]> = {};
-  for (const p of parts) {
-    if (!byCategory[p.category]) byCategory[p.category] = [];
-    byCategory[p.category].push(p);
-  }
-
-  for (const [category, items] of Object.entries(byCategory)) {
-    lines.push(`\n${category}:`);
-    for (const item of items) {
-      const low = `CA$${item.price_low.toFixed(2)}`;
-      const high = item.price_high != null ? `–CA$${item.price_high.toFixed(2)}` : '';
-      const note = item.notes ? ` (${item.notes})` : '';
-      lines.push(`- ${item.name}: ${low}${high}${note}`);
-    }
-  }
-
-  return lines.join('\n');
-}
 
 type Message = {
   id: string;
@@ -63,91 +19,62 @@ export default function App() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shopName, setShopName] = useState("Mike's Auto Repair");
-  const [pricesLoaded, setPricesLoaded] = useState(false);
+  const [ready, setReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const chatRef = useRef<any>(null);
-
   useEffect(() => {
-    async function initChat() {
-      let priceList = '';
-      let fetchedShopName: string = "Mike's Auto Repair";
-      let geminiKey = '';
+    async function init() {
       try {
-        const [partsRes, settingsRes, configRes] = await Promise.all([
-          fetch('/api/parts'),
-          fetch('/api/settings'),
-          fetch('/api/config'),
-        ]);
-        const parts: Part[] = partsRes.ok ? await partsRes.json() : [];
-        const settings = settingsRes.ok ? await settingsRes.json() : {};
-        const config = configRes.ok ? await configRes.json() : {};
-        fetchedShopName = settings.shop_name ?? "Mike's Auto Repair";
-        geminiKey = config.gemini_api_key ?? '';
-        setShopName(fetchedShopName);
+        const res = await fetch('/api/settings');
+        const settings = res.ok ? await res.json() : {};
+        const name: string = settings.shop_name ?? "Mike's Auto Repair";
+        setShopName(name);
         setMessages([{
           id: '1',
           role: 'model',
-          text: `Hi there! Welcome to **${fetchedShopName}**. How can I help you with your vehicle today?`,
+          text: `Hi there! Welcome to **${name}**. How can I help you with your vehicle today?`,
         }]);
-        priceList = formatPriceList(parts);
-      } catch (err) {
-        console.warn('Could not fetch config — using base prompt only:', err);
+      } catch {
+        // use defaults
       }
-
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      chatRef.current = ai.chats.create({
-        model: 'gemini-3-flash-preview',
-        config: {
-          systemInstruction: (priceList
-            ? BASE_SYSTEM_PROMPT + '\n\n' + priceList
-            : BASE_SYSTEM_PROMPT).replace('{SHOP_NAME}', fetchedShopName),
-        },
-      });
-      setPricesLoaded(true);
+      setReady(true);
     }
-    initChat();
+    init();
   }, []);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading || !pricesLoaded) return;
+    if (!input.trim() || isLoading || !ready) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      text: input.trim(),
-    };
+    const text = input.trim().slice(0, 1000);
+    const userMessage: Message = { id: Date.now().toString(), role: 'user', text };
+    const history = messages.map((m) => ({ role: m.role, text: m.text }));
 
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
 
     try {
-      const response = await chatRef.current.sendMessage({ message: userMessage.text });
-
-      const modelMessage: Message = {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history }),
+      });
+      const data = res.ok ? await res.json() : null;
+      setMessages((prev) => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: response.text || "I'm sorry, I didn't quite get that.",
-      };
-
-      setMessages((prev) => [...prev, modelMessage]);
-    } catch (error) {
-      console.error("Error sending message:", error);
-      const errorMessage: Message = {
+        text: data?.text || "I'm sorry, I didn't quite get that.",
+      }]);
+    } catch {
+      setMessages((prev) => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: "Sorry, I'm having trouble connecting right now. Please try again later or call the shop directly at (555) 123-4567.",
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+        text: "Sorry, I'm having trouble connecting right now. Please try again later or call the shop directly.",
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -165,9 +92,9 @@ export default function App() {
             <div>
               <h1 className="font-bold text-xl tracking-tight">{shopName}</h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className={`w-2 h-2 rounded-full ${pricesLoaded ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`}></span>
+                <span className={`w-2 h-2 rounded-full ${ready ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`}></span>
                 <p className="text-slate-300 text-xs font-medium uppercase tracking-wider">
-                  {pricesLoaded ? 'Virtual Assistant Online' : 'Loading prices…'}
+                  {ready ? 'Virtual Assistant Online' : 'Loading…'}
                 </p>
               </div>
             </div>
@@ -181,28 +108,11 @@ export default function App() {
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50">
           {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-4 ${
-                msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'
-              }`}
-            >
-              <div
-                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-sm ${
-                  msg.role === 'user'
-                    ? 'bg-slate-200 text-slate-600'
-                    : 'bg-amber-500 text-slate-900'
-                }`}
-              >
+            <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-sm ${msg.role === 'user' ? 'bg-slate-200 text-slate-600' : 'bg-amber-500 text-slate-900'}`}>
                 {msg.role === 'user' ? <User size={20} /> : <Wrench size={20} />}
               </div>
-              <div
-                className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-5 py-4 ${
-                  msg.role === 'user'
-                    ? 'bg-slate-900 text-white rounded-tr-sm shadow-md'
-                    : 'bg-white text-slate-800 shadow-sm border border-slate-200 rounded-tl-sm'
-                }`}
-              >
+              <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-5 py-4 ${msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-sm shadow-md' : 'bg-white text-slate-800 shadow-sm border border-slate-200 rounded-tl-sm'}`}>
                 {msg.role === 'user' ? (
                   <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                 ) : (
@@ -230,24 +140,19 @@ export default function App() {
 
         {/* Input Area */}
         <div className="p-4 sm:p-5 bg-white border-t border-slate-200">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            className="flex gap-3 relative"
-          >
+          <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-3 relative">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={pricesLoaded ? "Describe your car issue or ask a question..." : "Loading shop prices…"}
+              maxLength={1000}
+              placeholder={ready ? "Describe your car issue or ask a question..." : "Loading…"}
               className="flex-1 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all text-[15px] shadow-sm"
-              disabled={isLoading || !pricesLoaded}
+              disabled={isLoading || !ready}
             />
             <button
               type="submit"
-              disabled={!input.trim() || isLoading || !pricesLoaded}
+              disabled={!input.trim() || isLoading || !ready}
               className="absolute right-2 top-2 bottom-2 aspect-square bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center shadow-sm"
             >
               <Send size={18} className="ml-0.5" />
