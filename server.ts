@@ -17,7 +17,13 @@ if (!process.env.ADMIN_KEY) {
 }
 
 const app = express();
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      upgradeInsecureRequests: null, // remove until HTTPS is active on the server
+    },
+  },
+}));
 app.use(express.json({ limit: '16kb' }));
 
 // Rate limiters
